@@ -5,6 +5,15 @@ from routers.news import router as news_router
 from routers.prefs import router as prefs_router
 
 app = FastAPI()
+from fastapi.responses import RedirectResponse, PlainTextResponse
+
+@app.get("/", include_in_schema=False)
+def home():
+    return RedirectResponse(url="/ui")
+
+@app.head("/", include_in_schema=False)
+def home_head():
+    return PlainTextResponse("")
 
 @app.get("/")
 def root():
@@ -19,6 +28,7 @@ templates = Jinja2Templates(directory="templates")
 @app.get("/ui")
 def ui(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
+
 @app.get("/healthz")
 def healthz():
     return {"status": "ok"}
