@@ -1,16 +1,25 @@
-from fastapi import FastAPI
-from .db import init_db
-from .routers import morning, goals, tasks, study, metrics, prefs
+from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from routers.news import router as news_router
+from routers.prefs import router as prefs_router
 
-app = FastAPI(title="Student AI CoS", version="0.1.0")
+app = FastAPI()
 
-@app.on_event("startup")
-def on_startup():
-    init_db()
+@app.get("/")
+def root():
+    return {"ok": True, "msg": "G'day from FastAPI"}
 
-app.include_router(morning.router)
-app.include_router(goals.router)
-app.include_router(tasks.router)
-app.include_router(study.router)
-app.include_router(metrics.router)
-app.include_router(prefs.router)
+app.include_router(news_router)
+app.include_router(prefs_router)
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
+
+@app.get("/ui")
+def ui(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok"}
+

@@ -1,0 +1,17 @@
+<!doctype html><meta charset="utf-8">
+<title>Personal Agent</title>
+<h1>News search</h1>
+<form id="f">
+  <input name="topic" placeholder="e.g., Padres or Taylor Swift" required>
+  <button>Search</button>
+</form>
+<pre id="out"></pre>
+<script>
+const f=document.getElementById('f'), out=document.getElementById('out');
+f.addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const topic = new FormData(f).get('topic');
+  const r = await fetch('/news?topic='+encodeURIComponent(topic));
+  out.textContent = JSON.stringify(await r.json(), null, 2);
+});
+</script>

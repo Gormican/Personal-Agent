@@ -1,0 +1,91 @@
+<!doctype html><meta charset="utf-8">
+<title>Personal Agent</title>
+<style>
+  body{font-family:system-ui,Segoe UI,Arial;max-width:760px;margin:40px auto;line-height:1.4}
+  h1,h2{margin:.2em 0}
+  form,button,input{font-size:16px}
+  .row{display:flex;gap:.5rem;margin:.3rem 0}
+  .box{padding:.75rem;border:1px solid #ddd;border-radius:8px;margin-top:.75rem;white-space:pre-wrap}
+  .pill{display:inline-block;padding:.15rem .5rem;border:1px solid #bbb;border-radius:999px;margin:.15rem .25rem 0 0}
+</style>
+
+<h1>News search</h1>
+<form id="search">
+  <div class="row">
+    <input name="topic" placeholder="e.g., Padres or Taylor Swift" required style="flex:1">
+    <button>Search</button>
+  </div>
+</form>
+<div class="row">
+  <button id="save" disabled>Save current topic</button>
+  <button id="show">Show my feed</button>
+</div>
+<div id="status"></div>
+
+<h2>Results</h2>
+<pre id="out" class="box"></pre>
+
+<h2>My topics</h2>
+<div id="topics" class="box"></div>
+
+<h2>My feed</h2>
+<div id="feed" class="box"></div>
+
+<script>
+const $ = (s)=>document.querySelector(s);
+const out = $('#out'), feed = $('#feed'), topicsBox = $('#topics'), status = $('#status');
+let lastTopic = null;
+
+async function getPrefs(){
+  const r = await fetch('/prefs/news'); return await r.json(); // {topics:[...]}
+}
+async function savePrefs(topics){
+  const r = await fetch('/prefs/news', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({topics})
+  });
+  return await r.json();
+}
+function showTopics(list){
+  topicsBox.innerHTML = list.length ? list.map(t=>`<span class="pill">${t}</span>`).join(' ')
+                                   : 'No topics saved yet.';
+}
+
+$('#search').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const topic = new FormData(e.target).get('topic').trim();
+  if(!topic) return;
+  lastTopic = topic;
+  $('#save').disabled = false;
+
+  const r = await fetch('/news?topic='+encodeURIComponent(topic));
+  const j = await r.json();
+  out.textContent = JSON.stringify(j, null, 2);
+  status.textContent = '';
+});
+
+$('#save').addEventListener('click', async ()=>{
+  if(!lastTopic) return;
+  const prefs = await getPrefs();
+  const set = new Set(prefs.topics || []);
+  set.add(lastTopic);
+  const saved = Array.from(set);
+  await savePrefs(saved);
+  showTopics(saved);
+  status.textContent = `Saved topic: ${lastTopic}`;
+});
+
+$('#show').addEventListener('click', async ()=>{
+  const r = await fetch('/news/for-me');
+  const j = await r.json(); // {topics:[], buckets:[{topic,articles:[]}]}
+  if(!j.buckets.length){ feed.textContent = 'No saved topics yet.'; return; }
+  feed.innerHTML = j.buckets.map(b=>{
+    const lines = (b.articles||[]).map(a=>`• ${a.title}\n  ${a.link}`).join('\n');
+    return `# ${b.topic}\n${lines}`;
+  }).join('\n\n');
+});
+
+// init: load current topics
+getPrefs().then(p=>showTopics(p.topics||[])).catch(()=>showTopics([]));
+</script>
+

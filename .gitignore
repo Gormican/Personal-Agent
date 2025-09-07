@@ -1,10 +1,10 @@
-.env
-*.env
-app.db
+# python
 __pycache__/
-.venv/
-venv/
 *.pyc
-.DS_Store
-.idea/
-.vscode/
+*.pyo
+*.pyd
+.venv/
+.env
+# local data
+data/*.json
+
