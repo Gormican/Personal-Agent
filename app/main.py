@@ -7,6 +7,10 @@ from fastapi.responses import RedirectResponse, PlainTextResponse
 from routers.news import router as news_router
 from routers.prefs import router as prefs_router
 from routers.study import router as study_router
+app.include_router(study_router)
+from routers.report import router as report_router
+app.include_router(report_router)
+
 
 app = FastAPI()
 
