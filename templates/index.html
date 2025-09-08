@@ -20,6 +20,53 @@
   <a href="/healthz">Health</a>
 </nav>
 
+<h2>Morning report</h2>
+<label><input type="checkbox" id="mrSmart"> Smart summary</label>
+<div class="row">
+  <button id="mrUseLoc" type="button">Use my location</button>
+  <button id="mrPlay" type="button">▶ Play Morning Report</button>
+</div>
+<audio id="mrAudio" controls class="box"></audio>
+<pre id="mrText" class="box"></pre>
+
+<script>
+(function(){
+  const audio = document.getElementById('mrAudio');
+  const textBox = document.getElementById('mrText');
+  const smartBox = document.getElementById('mrSmart');
+  let coords = null;
+
+  document.getElementById('mrUseLoc').onclick = async ()=>{
+    try{
+      const pos = await navigator.geolocation.getCurrentPosition(
+        p => p, e => { throw e; }, { enableHighAccuracy: true, timeout: 8000 }
+      );
+      coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      textBox.textContent = `Location set: ${coords.lat.toFixed(3)}, ${coords.lon.toFixed(3)}`;
+    }catch(e){
+      textBox.textContent = 'Location permission denied or unavailable.';
+    }
+  };
+
+  document.getElementById('mrPlay').onclick = async ()=>{
+    const params = new URLSearchParams();
+    if (smartBox.checked) params.set('smart','true');
+    if (coords){ params.set('lat', coords.lat); params.set('lon', coords.lon); }
+    const url = '/report/morning/speak?' + params.toString();
+
+    textBox.textContent = 'Preparing your report…';
+    const r1 = await fetch('/report/morning?' + params.toString());
+    if (r1.ok){ const j = await r1.json(); textBox.textContent = j.text; }
+
+    const r = await fetch(url);
+    if(!r.ok){ textBox.textContent += '\n\nAudio error: ' + await r.text(); return; }
+    const buf = await r.arrayBuffer();
+    audio.src = URL.createObjectURL(new Blob([buf], {type:'audio/mpeg'}));
+    audio.play();
+  };
+})();
+</script>
+
 <h1>News search</h1>
 <form id="search">
   <div class="row">
