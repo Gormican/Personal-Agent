@@ -10,19 +10,36 @@ from fastapi.responses import StreamingResponse
 import feedparser
 import httpx
 
-# reuse OpenAI helper + prefs
+# Try to reuse the study helper; support both names, or fall back locally.
 try:
-    from routers.study import _get_client
+    from routers.study import _get_client as study_get_client
 except Exception:
-    _get_client = None
+    try:
+        from routers.study import get_client as study_get_client  # older name, just in case
+    except Exception:
+        study_get_client = None
+
+# Allow secret-file envs here too (harmless if absent)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(); load_dotenv("/etc/secrets/.env")
+except Exception:
+    pass
+
+def _local_get_client():
+    try:
+        from openai import OpenAI
+    except Exception:
+        return None
+    key = os.getenv("OPENAI_API_KEY") or os.getenv("OAI_API_KEY")
+    return OpenAI(api_key=key) if key else None
 
 from routers.prefs import get_news_prefs
 
-# timezone formatting (nice local date if tz provided)
 try:
-    from zoneinfo import ZoneInfo  # py>=3.9
+    from zoneinfo import ZoneInfo  # py >= 3.9
 except Exception:
-    ZoneInfo = None  # fallback
+    ZoneInfo = None
 
 router = APIRouter(prefix="/report", tags=["report"])
 
@@ -34,7 +51,6 @@ def _local_today_str(tz: Optional[str]) -> str:
             dt = datetime.now(ZoneInfo(tz))
         except Exception:
             pass
-    # weekday, Month day
     return dt.strftime("%A, %B %d")
 
 def _fetch_headlines(topic: str, per: int) -> List[str]:
@@ -43,9 +59,6 @@ def _fetch_headlines(topic: str, per: int) -> List[str]:
     return [e.title for e in d.entries[:per]]
 
 async def _fetch_weather(lat: Optional[float], lon: Optional[float], tz: Optional[str]) -> Optional[str]:
-    """
-    Uses Open-Meteo daily forecast. If no lat/lon provided, returns None.
-    """
     if lat is None or lon is None:
         return None
     params = {
@@ -66,42 +79,31 @@ async def _fetch_weather(lat: Optional[float], lon: Optional[float], tz: Optiona
         pops = daily.get("precipitation_probability_max", [])
         if not highs or not lows:
             return None
-        hi = round(highs[0])
-        lo = round(lows[0])
-        pop = (pops[0] if pops else 0)
+        hi = round(highs[0]); lo = round(lows[0]); pop = (pops[0] if pops else 0)
         return f"Weather: high {hi}°, low {lo}°, rain {pop}%."
     except Exception:
-        return None  # fail quietly for now
+        return None
 
 def _schedule_stub() -> Optional[str]:
-    """
-    Placeholder: return None (no calendar yet).
-    Later we’ll swap this to Google Calendar/ICS.
-    """
-    # You can temporarily set a one-line summary via env if you like:
-    # e.g., REPORT_SCHEDULE_TODAY="09:00 Clinic; 12:30 Lunch with Sara"
     s = os.getenv("REPORT_SCHEDULE_TODAY")
     return s.strip() if s else None
 
 async def _build_script(smart: bool, per: int, lat: Optional[float], lon: Optional[float], tz: Optional[str]) -> str:
     lines: List[str] = []
-    lines.append(f"Good morning. Here’s your report for { _local_today_str(tz) }.")
+    lines.append(f"Good morning. Here’s your report for {_local_today_str(tz)}.")
 
-    # Schedule (stub / optional)
     sched = _schedule_stub()
     lines.append(sched if sched else "No calendar connected yet.")
 
-    # Weather (optional)
     w = await _fetch_weather(lat, lon, tz)
     if w: lines.append(w)
 
-    # News (from your saved topics)
-    prefs = get_news_prefs()  # pydantic model with .topics
-    topics = (prefs.topics or []) if hasattr(prefs, "topics") else []
+    prefs = get_news_prefs()
+    topics = (getattr(prefs, "topics", None) or [])
     if topics:
         for t in topics:
             hs = _fetch_headlines(t, per)
-            if not hs: 
+            if not hs:
                 continue
             lines.append(f"{t}:")
             for h in hs:
@@ -111,13 +113,11 @@ async def _build_script(smart: bool, per: int, lat: Optional[float], lon: Option
 
     script = "\n".join(lines)
 
-    # Optional: smart summary via OpenAI
     if smart:
-        if _get_client is None:
-            # still speak the raw script
+        client = study_get_client() if callable(study_get_client) else _local_get_client()
+        if not client:
             return script + "\n\n(Note: smart summary unavailable.)"
         try:
-            client = _get_client()
             resp = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
@@ -157,9 +157,10 @@ async def morning_speak(
     if not text:
         raise HTTPException(400, "No report content.")
 
-    if _get_client is None:
-        raise HTTPException(500, "TTS requires OpenAI client.")
-    client = _get_client()
+    client = study_get_client() if callable(study_get_client) else _local_get_client()
+    if client is None:
+        raise HTTPException(500, "TTS requires OpenAI key. Set OPENAI_API_KEY or Secret File.")
+
     voice = os.getenv("TTS_VOICE", "alloy")
     model = os.getenv("TTS_MODEL", "tts-1")  # try 'gpt-4o-mini-tts' later if enabled
     r = client.audio.speech.create(model=model, voice=voice, input=text)
@@ -168,3 +169,4 @@ async def morning_speak(
         yield r.read()
 
     return StreamingResponse(gen(), media_type="audio/mpeg")
+

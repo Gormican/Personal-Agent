@@ -4,7 +4,7 @@ from fastapi.responses import RedirectResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-# --- app first ---
+# --- create app first ---
 app = FastAPI()
 
 # --- paths ---
