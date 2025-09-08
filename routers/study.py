@@ -5,6 +5,9 @@ from typing import Optional
 import os
 
 from openai import OpenAI
+from dotenv import load_dotenv
+load_dotenv()                      # load local .env if present
+load_dotenv("/etc/secrets/.env")   # load Render secret file if present
 
 router = APIRouter(prefix="/study", tags=["study"])
 
