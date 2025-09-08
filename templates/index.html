@@ -88,6 +88,17 @@ $('#show').addEventListener('click', async ()=>{
   }).join('\n\n');
 });
 
+topicsBox.addEventListener('click', async (e)=>{
+  const t = e.target?.dataset?.del;
+  if(!t) return;
+  const prefs = await getPrefs();
+  const saved = (prefs.topics || []).filter(x => x !== t);
+  await savePrefs(saved);
+  showTopics(saved);
+  status.textContent = `Removed topic: ${t}`;
+});
+
+
 // Remove topic via (×)
 topicsBox.addEventListener('click', async (e)=>{
   const t = e.target?.dataset?.del;
