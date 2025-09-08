@@ -28,6 +28,7 @@ def home_head():
 # ---- routers ----
 app.include_router(news_router)
 app.include_router(prefs_router)
+app.include_router(study_router)
 
 # ---- tiny UI + health ----
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
