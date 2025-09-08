@@ -6,19 +6,21 @@ import os, json
 router = APIRouter(prefix="/prefs", tags=["prefs"])
 
 # ---- file fallback path (used locally if no KV) ----
-DATA_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "prefs.json"))
+DATA_FILE = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "data", "prefs.json")
+)
 
-# ---- optional Key-Value backend (Render) ----
-# If you later add an env var KV_URL in Render, it will override this default.
-KV_URL = os.getenv("KV_URL", "redis://red-d2v10gbe5dus73f7orv0:6379")  # swap to rediss://... if TLS required
+# ---- optional Key-Value (Redis) backend ----
+# Prefer setting KV_URL in Render env; the default below is only for convenience.
+KV_URL = os.getenv("KV_URL", "redis://red-d2v10gbe5dus73f7orv0:6379")  # use rediss://... if TLS
 _KV_KEY = "prefs:topics"
 _R = None
 try:
-    import redis  # requires 'redis' package
+    import redis  # make sure 'redis' is in requirements.txt
     if KV_URL:
         _R = redis.from_url(KV_URL, decode_responses=True)
 except Exception:
-    _R = None  # fall back to file if client/URL fails
+    _R = None  # harmless fallback to file if Redis not available
 
 class NewsPrefsIn(BaseModel):
     topics: List[str] = []
@@ -55,4 +57,5 @@ def get_news_prefs():
 def set_news_prefs(prefs: NewsPrefsIn):
     _write(prefs.dict())
     return prefs
+
 
