@@ -7,4 +7,9 @@ __pycache__/
 .env
 # local data
 data/*.json
+# DBs and OS cruft
+*.db
+.DS_Store
+.vscode/
+.idea/
 
