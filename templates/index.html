@@ -32,6 +32,27 @@
   <button id="show">Show my feed</button>
 </div>
 <div id="status" style="min-height:1.2rem"></div>
+<h2>Study helper</h2>
+<textarea id="q" rows="4" class="box" placeholder="Ask a study question, e.g., 'Workup of painless jaundice in a 60-year-old'"></textarea>
+<div class="row"><button id="ask">Ask</button></div>
+<pre id="studyOut" class="box"></pre>
+
+<script>
+document.querySelector('#ask').addEventListener('click', async ()=>{
+  const q = document.querySelector('#q').value.trim();
+  const out = document.querySelector('#studyOut');
+  if(!q){ out.textContent = 'Type a question first.'; return; }
+  out.textContent = 'Thinking…';
+  const r = await fetch('/study/ask', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({question:q})
+  });
+  if(!r.ok){ out.textContent = 'Server error: ' + await r.text(); return; }
+  const j = await r.json();
+  out.textContent = j.answer || '(no answer)';
+});
+</script>
 
 <h2>Results</h2>
 <pre id="out" class="box"></pre>
