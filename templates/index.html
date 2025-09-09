@@ -24,24 +24,21 @@
   <h2>Morning report</h2>
   <label><input type="checkbox" id="mrSmart"> Smart summary</label>
   <div class="row">
-    <button id="mrUseLoc" type="button">Use my location</button>
     <button id="mrPlay" type="button">▶ Play Morning Report</button>
   </div>
   <audio id="mrAudio" controls class="box"></audio>
   <pre id="mrText" class="box"></pre>
 
-  <!-- News search -->
-  <h2>News search</h2>
-  <div class="row">
-    <input id="q" type="text" placeholder="e.g., Padres or Taylor Swift">
-    <button id="search">Search</button>
-    <button id="save">Save current topic</button>
-  </div>
-  <div id="resultsBox" class="box"></div>
-
-  <!-- My topics -->
-  <h2>My topics</h2>
+  <!-- Current topics chosen -->
+  <h2>Current Topics Chosen</h2>
   <div id="topicsBox" class="box"></div>
+
+  <!-- Add new topics -->
+  <h2>Add New Topics</h2>
+  <div class="row">
+    <input id="topicNew" type="text" placeholder="e.g., Padres, Taylor Swift, CRISPR">
+    <button id="addTopic">Add topic</button>
+  </div>
 
   <!-- Settings -->
   <h2>Settings</h2>
@@ -50,29 +47,24 @@
   <div class="box">
     <strong>Home location</strong>
     <div class="row">
-      <input id="homeLat" type="number" step="0.000001" placeholder="lat e.g. 32.685">
-      <input id="homeLon" type="number" step="0.000001" placeholder="lon e.g. -117.183">
-      <input id="homeTz"  type="text" placeholder='tz e.g. "America/Los_Angeles"'>
-    </div>
-    <div class="row">
-      <button id="btnUseLoc">Use current location</button>
-      <button id="btnSaveHome">Save home</button>
+      <input id="homeQuery" type="text" placeholder="City or ZIP (e.g., Coronado or 92118)">
+      <button id="btnSaveHome">Lookup & Save</button>
       <button id="btnLoadHome">Load saved</button>
     </div>
+    <div id="homeSaved" class="muted"></div>
   </div>
 
   <div class="box">
     <strong>Calendar</strong>
     <div class="row">
-      <input id="calUrl" type="url" placeholder="ICS URL (Google Calendar → Secret iCal address)">
-    </div>
-    <div class="row">
+      <input id="calUrl" type="url" placeholder="Google Calendar → Settings → Integrate → Secret iCal (.ics) URL">
       <button id="btnSaveCal">Save calendar</button>
       <button id="btnLoadCal">Load saved</button>
     </div>
+    <div class="muted">Tip: In Google Calendar web → ⚙ Settings → select your calendar → Integrate calendar → copy <em>Secret address in iCal format</em> and paste here.</div>
   </div>
 
-  <!-- Study helper (kept at bottom) -->
+  <!-- Study helper (bottom) -->
   <h2>Study helper</h2>
   <div class="row">
     <input id="studyQ" type="text" placeholder="Ask a study question…">
@@ -82,68 +74,54 @@
 
 <script>
 (async function(){
-  // ---------- News search ----------
-  const qBox = document.getElementById('q');
-  const resBox = document.getElementById('resultsBox');
+  // ---------- Topics ----------
   const topicsBox = document.getElementById('topicsBox');
+  const settingsMsg = document.getElementById('settingsMsg');
+  function note(t, ok=false){ settingsMsg.textContent = t; settingsMsg.className = ok ? 'ok' : 'err'; }
 
-  document.getElementById('search').onclick = async ()=>{
-    resBox.textContent = 'Searching…';
-    const q = qBox.value.trim();
-    if(!q){ resBox.textContent='Enter a topic'; return; }
-    const r = await fetch('/news?topic='+encodeURIComponent(q));
-    resBox.textContent = r.ok ? (await r.text()) : ('Error: ' + await r.text());
-  };
-
-  document.getElementById('save').onclick = async ()=>{
-    const topic = qBox.value.trim();
-    if(!topic){ alert('No topic to save'); return; }
-    let current = [];
+  async function loadTopics(){
     try{
       const r = await fetch('/prefs/news');
-      if(r.ok) current = (await r.json()).topics || [];
-    }catch{}
-    if (!current.includes(topic)) current.push(topic);
-    const r = await fetch('/prefs/news',{method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({topics: current})
-    });
-    if(r.ok){ renderTopics((await r.json()).topics); }
-  };
-
-  async function renderTopics(topics){
-    if(!topics || topics.length===0){ topicsBox.textContent='(none)'; return; }
-    topicsBox.innerHTML = topics.map(t=>
+      if(!r.ok){ topicsBox.textContent='(none)'; return; }
+      const topics = (await r.json()).topics || [];
+      renderTopics(topics);
+    }catch{ topicsBox.textContent='(none)'; }
+  }
+  function renderTopics(topics){
+    if(!topics.length){ topicsBox.textContent='(none)'; return; }
+    topicsBox.innerHTML = topics.map(t =>
       `<div>${t} <button onclick="removeTopic('${t}')">✖</button></div>`
     ).join('');
   }
   window.removeTopic = async (topic)=>{
-    let current = [];
-    try{ const r = await fetch('/prefs/news');
-         if(r.ok) current = (await r.json()).topics || []; }catch{}
-    current = current.filter(x=>x!==topic);
-    const r = await fetch('/prefs/news',{method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({topics: current})
-    });
-    if(r.ok){ renderTopics((await r.json()).topics); }
+    try{
+      const r = await fetch('/prefs/news');
+      let topics = r.ok ? (await r.json()).topics || [] : [];
+      topics = topics.filter(x=>x!==topic);
+      const s = await fetch('/prefs/news',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topics})});
+      if(s.ok) renderTopics((await s.json()).topics);
+    }catch{}
   };
-
-  // initial topics load
-  try{ const r = await fetch('/prefs/news');
-       if(r.ok) renderTopics((await r.json()).topics); }catch{}
+  document.getElementById('addTopic').onclick = async ()=>{
+    const val = document.getElementById('topicNew').value.trim();
+    if(!val) return;
+    try{
+      const r = await fetch('/prefs/news');
+      let topics = r.ok ? (await r.json()).topics || [] : [];
+      if(!topics.includes(val)) topics.push(val);
+      const s = await fetch('/prefs/news',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topics})});
+      if(s.ok){ renderTopics((await s.json()).topics); document.getElementById('topicNew').value=''; }
+    }catch{}
+  };
+  loadTopics();
 
   // ---------- Study helper ----------
-  const studyBtn = document.getElementById('studyAsk');
-  studyBtn.onclick = async ()=>{
+  document.getElementById('studyAsk').onclick = async ()=>{
     const q = document.getElementById('studyQ').value.trim();
-    if(!q){ return; }
+    if(!q) return;
     const out = document.getElementById('studyA');
     out.textContent = 'Thinking…';
-    const r = await fetch('/study/ask',{method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({question:q})
-    });
+    const r = await fetch('/study/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});
     out.textContent = r.ok ? (await r.json()).answer : ('Error: ' + await r.text());
   };
 
@@ -151,24 +129,9 @@
   const audio = document.getElementById('mrAudio');
   const textBox = document.getElementById('mrText');
   const smartBox = document.getElementById('mrSmart');
-  let coords = null;
-
-  document.getElementById('mrUseLoc').onclick = async ()=>{
-    try{
-      const pos = await new Promise((res,rej)=>
-        navigator.geolocation.getCurrentPosition(res,rej,{enableHighAccuracy:true,timeout:8000})
-      );
-      coords = {lat:pos.coords.latitude, lon:pos.coords.longitude};
-      textBox.textContent = `Location set: ${coords.lat.toFixed(3)}, ${coords.lon.toFixed(3)}`;
-    }catch(e){
-      textBox.textContent = 'Location permission denied or unavailable.';
-    }
-  };
-
   document.getElementById('mrPlay').onclick = async ()=>{
     const params = new URLSearchParams();
     if (smartBox.checked) params.set('smart','true');
-    if (coords){ params.set('lat', coords.lat); params.set('lon', coords.lon); }
     const qs = params.toString();
     const textUrl = '/report/morning' + (qs?('?'+qs):'');
     const audioUrl = '/report/morning/speak' + (qs?('?'+qs):'');
@@ -184,54 +147,39 @@
     audio.play();
   };
 
-  // ---------- Settings: Home + Calendar ----------
-  const msg = document.getElementById('settingsMsg');
-  const latI = document.getElementById('homeLat');
-  const lonI = document.getElementById('homeLon');
-  const tzI  = document.getElementById('homeTz');
-  const calI = document.getElementById('calUrl');
-
-  function note(t, ok=false){ msg.textContent = t; msg.className = ok ? 'ok' : 'err'; }
-
-  // Load saved home
+  // ---------- Settings: Home by city/ZIP ----------
+  const homeSaved = document.getElementById('homeSaved');
   document.getElementById('btnLoadHome').onclick = async ()=>{
     try{
       const r = await fetch('/prefs/home');
-      if(!r.ok){ note('No saved home yet.', false); return; }
+      if(!r.ok){ homeSaved.textContent='No saved home yet.'; return; }
       const j = await r.json();
-      latI.value = j.lat; lonI.value = j.lon; tzI.value = j.tz || '';
-      note('Loaded home.', true);
-    }catch(e){ note('Failed to load home.', false); }
+      homeSaved.textContent = `Saved home: ${j.lat.toFixed(3)}, ${j.lon.toFixed(3)} (${j.tz||'tz n/a'})`;
+    }catch{ homeSaved.textContent='(load failed)'; }
   };
-
-  // Use current device location
-  document.getElementById('btnUseLoc').onclick = async ()=>{
-    try{
-      const pos = await new Promise((res,rej)=>
-        navigator.geolocation.getCurrentPosition(res,rej,{enableHighAccuracy:true,timeout:8000})
-      );
-      latI.value = pos.coords.latitude.toFixed(6);
-      lonI.value = pos.coords.longitude.toFixed(6);
-      if(!tzI.value) tzI.value = 'America/Los_Angeles';
-      note('Filled from device location.', true);
-    }catch(e){ note('Location permission denied or unavailable.', false); }
-  };
-
-  // Save home
   document.getElementById('btnSaveHome').onclick = async ()=>{
-    const lat = parseFloat(latI.value), lon = parseFloat(lonI.value), tz = tzI.value.trim() || null;
-    if(Number.isNaN(lat) || Number.isNaN(lon)){ note('Enter numeric lat/lon.', false); return; }
+    const q = document.getElementById('homeQuery').value.trim();
+    if(!q){ note('Enter a city or ZIP.', false); return; }
     try{
-      const r = await fetch('/prefs/home',{method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({lat, lon, tz})
-      });
-      if(!r.ok){ note('Save failed: ' + await r.text(), false); return; }
-      note('Home saved.', true);
-    }catch(e){ note('Save failed.', false); }
+      // Open-Meteo geocoding (no key required)
+      const url = 'https://geocoding-api.open-meteo.com/v1/search?count=1&language=en&format=json&name='+encodeURIComponent(q);
+      const g = await fetch(url);
+      if(!g.ok){ note('Lookup failed.', false); return; }
+      const J = await g.json();
+      const r = (J.results && J.results[0]) || null;
+      if(!r){ note('No match found.', false); return; }
+      const payload = { lat: r.latitude, lon: r.longitude, tz: r.timezone || 'America/Los_Angeles' };
+      const s = await fetch('/prefs/home',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      if(!s.ok){ note('Save failed: ' + await s.text(), false); return; }
+      note(`Home saved: ${r.name || q} → ${payload.lat.toFixed(3)}, ${payload.lon.toFixed(3)} (${payload.tz})`, true);
+      document.getElementById('btnLoadHome').click();
+    }catch(e){ note('Lookup error.', false); }
   };
+  // try to show current saved home on load
+  document.getElementById('btnLoadHome').click();
 
-  // Load saved calendar
+  // ---------- Settings: Calendar ICS ----------
+  const calI = document.getElementById('calUrl');
   document.getElementById('btnLoadCal').onclick = async ()=>{
     try{
       const r = await fetch('/prefs/calendar');
@@ -239,27 +187,20 @@
       const j = await r.json();
       calI.value = j.ics_url || '';
       note('Loaded calendar.', true);
-    }catch(e){ note('Failed to load calendar.', false); }
+    }catch{ note('Failed to load calendar.', false); }
   };
-
-  // Save calendar
   document.getElementById('btnSaveCal').onclick = async ()=>{
     const ics_url = calI.value.trim();
-    if(!ics_url){ note('Enter an ICS URL.', false); return; }
+    if(!ics_url){ note('Paste your iCal (.ics) URL from Google Calendar Settings.', false); return; }
     try{
-      const r = await fetch('/prefs/calendar',{method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ics_url})
-      });
+      const r = await fetch('/prefs/calendar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ics_url})});
       if(!r.ok){ note('Save failed: ' + await r.text(), false); return; }
       note('Calendar saved.', true);
-    }catch(e){ note('Save failed.', false); }
+    }catch{ note('Save failed.', false); }
   };
-
-  // Try to pre-fill settings on load (non-fatal)
-  document.getElementById('btnLoadHome').click();
   document.getElementById('btnLoadCal').click();
 })();
 </script>
 </body>
 </html>
+
