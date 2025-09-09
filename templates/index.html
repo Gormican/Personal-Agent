@@ -1,36 +1,153 @@
-<!doctype html><meta charset="utf-8">
-<title>Personal Agent</title>
-<style>
-  body{font-family:system-ui,Segoe UI,Arial;max-width:760px;margin:40px auto;line-height:1.4}
-  .nav{position:sticky;top:0;display:flex;gap:.5rem;padding:.6rem .8rem;border:1px solid #eee;border-radius:10px;margin-bottom:1rem;background:#fff}
-  .nav a{text-decoration:none;border:1px solid #ddd;border-radius:8px;padding:.35rem .6rem;color:#111}
-  .nav a:hover{background:#f5f5f5}
-  h1,h2{margin:.2em 0}
-  .row{display:flex;gap:.5rem;margin:.3rem 0}
-  .box{padding:.75rem;border:1px solid #ddd;border-radius:8px;margin-top:.75rem;white-space:pre-wrap}
-  /* pills + remove button */
-  .pill{display:inline-flex;align-items:center;gap:.35rem;padding:.15rem .5rem;border:1px solid #bbb;border-radius:999px;margin:.15rem .25rem 0 0}
-  .pill button{border:none;background:transparent;cursor:pointer;font-size:14px;line-height:1;padding:0 .2rem}
-  .pill button:hover{opacity:.7}
-</style>
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Personal Agent</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Arial, sans-serif; margin: 2rem; line-height: 1.45; }
+    h1, h2 { margin-top: 1.2rem; }
+    .row { display: flex; gap: .5rem; align-items: center; margin: .5rem 0; flex-wrap: wrap; }
+    .box { border: 1px solid #ccc; padding: .7rem; border-radius: 8px; margin: .4rem 0; white-space: pre-wrap; }
+    input[type="text"], input[type="url"], input[type="number"] { flex: 1; min-width: 220px; padding: .5rem .6rem; border: 1px solid #ccc; border-radius: 6px; }
+    button { padding: .45rem .7rem; border: 1px solid #bbb; border-radius: 6px; background: #fff; cursor: pointer; }
+    button:hover { background: #f7f7f7; }
+    .muted { color: #777; font-size: .9em; }
+    .ok { color: #137333; }
+    .err { color: #b00020; }
+    @media (max-width: 520px) { body { margin: 1rem; } }
+  </style>
+</head>
+<body>
+  <h1>Personal Agent</h1>
 
-<nav class="nav">
-  <a href="/ui">Home</a>
-  <a href="/docs">Docs</a>
-  <a href="/healthz">Health</a>
-</nav>
+  <!-- Morning report -->
+  <h2>Morning report</h2>
+  <label><input type="checkbox" id="mrSmart"> Smart summary</label>
+  <div class="row">
+    <button id="mrUseLoc" type="button">Use my location</button>
+    <button id="mrPlay" type="button">▶ Play Morning Report</button>
+  </div>
+  <audio id="mrAudio" controls class="box"></audio>
+  <pre id="mrText" class="box"></pre>
 
-<h2>Morning report</h2>
-<label><input type="checkbox" id="mrSmart"> Smart summary</label>
-<div class="row">
-  <button id="mrUseLoc" type="button">Use my location</button>
-  <button id="mrPlay" type="button">▶ Play Morning Report</button>
-</div>
-<audio id="mrAudio" controls class="box"></audio>
-<pre id="mrText" class="box"></pre>
+  <!-- News search -->
+  <h2>News search</h2>
+  <div class="row">
+    <input id="q" type="text" placeholder="e.g., Padres or Taylor Swift">
+    <button id="search">Search</button>
+    <button id="save">Save current topic</button>
+  </div>
+  <div id="resultsBox" class="box"></div>
+
+  <!-- My topics -->
+  <h2>My topics</h2>
+  <div id="topicsBox" class="box"></div>
+
+  <!-- Settings -->
+  <h2>Settings</h2>
+  <div id="settingsMsg" class="muted"></div>
+
+  <div class="box">
+    <strong>Home location</strong>
+    <div class="row">
+      <input id="homeLat" type="number" step="0.000001" placeholder="lat e.g. 32.685">
+      <input id="homeLon" type="number" step="0.000001" placeholder="lon e.g. -117.183">
+      <input id="homeTz"  type="text" placeholder='tz e.g. "America/Los_Angeles"'>
+    </div>
+    <div class="row">
+      <button id="btnUseLoc">Use current location</button>
+      <button id="btnSaveHome">Save home</button>
+      <button id="btnLoadHome">Load saved</button>
+    </div>
+  </div>
+
+  <div class="box">
+    <strong>Calendar</strong>
+    <div class="row">
+      <input id="calUrl" type="url" placeholder="ICS URL (Google Calendar → Secret iCal address)">
+    </div>
+    <div class="row">
+      <button id="btnSaveCal">Save calendar</button>
+      <button id="btnLoadCal">Load saved</button>
+    </div>
+  </div>
+
+  <!-- Study helper (kept at bottom) -->
+  <h2>Study helper</h2>
+  <div class="row">
+    <input id="studyQ" type="text" placeholder="Ask a study question…">
+    <button id="studyAsk">Ask</button>
+  </div>
+  <pre id="studyA" class="box"></pre>
 
 <script>
-(function(){
+(async function(){
+  // ---------- News search ----------
+  const qBox = document.getElementById('q');
+  const resBox = document.getElementById('resultsBox');
+  const topicsBox = document.getElementById('topicsBox');
+
+  document.getElementById('search').onclick = async ()=>{
+    resBox.textContent = 'Searching…';
+    const q = qBox.value.trim();
+    if(!q){ resBox.textContent='Enter a topic'; return; }
+    const r = await fetch('/news?topic='+encodeURIComponent(q));
+    resBox.textContent = r.ok ? (await r.text()) : ('Error: ' + await r.text());
+  };
+
+  document.getElementById('save').onclick = async ()=>{
+    const topic = qBox.value.trim();
+    if(!topic){ alert('No topic to save'); return; }
+    let current = [];
+    try{
+      const r = await fetch('/prefs/news');
+      if(r.ok) current = (await r.json()).topics || [];
+    }catch{}
+    if (!current.includes(topic)) current.push(topic);
+    const r = await fetch('/prefs/news',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({topics: current})
+    });
+    if(r.ok){ renderTopics((await r.json()).topics); }
+  };
+
+  async function renderTopics(topics){
+    if(!topics || topics.length===0){ topicsBox.textContent='(none)'; return; }
+    topicsBox.innerHTML = topics.map(t=>
+      `<div>${t} <button onclick="removeTopic('${t}')">✖</button></div>`
+    ).join('');
+  }
+  window.removeTopic = async (topic)=>{
+    let current = [];
+    try{ const r = await fetch('/prefs/news');
+         if(r.ok) current = (await r.json()).topics || []; }catch{}
+    current = current.filter(x=>x!==topic);
+    const r = await fetch('/prefs/news',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({topics: current})
+    });
+    if(r.ok){ renderTopics((await r.json()).topics); }
+  };
+
+  // initial topics load
+  try{ const r = await fetch('/prefs/news');
+       if(r.ok) renderTopics((await r.json()).topics); }catch{}
+
+  // ---------- Study helper ----------
+  const studyBtn = document.getElementById('studyAsk');
+  studyBtn.onclick = async ()=>{
+    const q = document.getElementById('studyQ').value.trim();
+    if(!q){ return; }
+    const out = document.getElementById('studyA');
+    out.textContent = 'Thinking…';
+    const r = await fetch('/study/ask',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({question:q})
+    });
+    out.textContent = r.ok ? (await r.json()).answer : ('Error: ' + await r.text());
+  };
+
+  // ---------- Morning report ----------
   const audio = document.getElementById('mrAudio');
   const textBox = document.getElementById('mrText');
   const smartBox = document.getElementById('mrSmart');
@@ -38,10 +155,10 @@
 
   document.getElementById('mrUseLoc').onclick = async ()=>{
     try{
-      const pos = await navigator.geolocation.getCurrentPosition(
-        p => p, e => { throw e; }, { enableHighAccuracy: true, timeout: 8000 }
+      const pos = await new Promise((res,rej)=>
+        navigator.geolocation.getCurrentPosition(res,rej,{enableHighAccuracy:true,timeout:8000})
       );
-      coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      coords = {lat:pos.coords.latitude, lon:pos.coords.longitude};
       textBox.textContent = `Location set: ${coords.lat.toFixed(3)}, ${coords.lon.toFixed(3)}`;
     }catch(e){
       textBox.textContent = 'Location permission denied or unavailable.';
@@ -52,134 +169,97 @@
     const params = new URLSearchParams();
     if (smartBox.checked) params.set('smart','true');
     if (coords){ params.set('lat', coords.lat); params.set('lon', coords.lon); }
-    const url = '/report/morning/speak?' + params.toString();
+    const qs = params.toString();
+    const textUrl = '/report/morning' + (qs?('?'+qs):'');
+    const audioUrl = '/report/morning/speak' + (qs?('?'+qs):'');
 
     textBox.textContent = 'Preparing your report…';
-    const r1 = await fetch('/report/morning?' + params.toString());
-    if (r1.ok){ const j = await r1.json(); textBox.textContent = j.text; }
+    const r1 = await fetch(textUrl);
+    if(r1.ok){ textBox.textContent = (await r1.json()).text; }
 
-    const r = await fetch(url);
+    const r = await fetch(audioUrl);
     if(!r.ok){ textBox.textContent += '\n\nAudio error: ' + await r.text(); return; }
     const buf = await r.arrayBuffer();
     audio.src = URL.createObjectURL(new Blob([buf], {type:'audio/mpeg'}));
     audio.play();
   };
+
+  // ---------- Settings: Home + Calendar ----------
+  const msg = document.getElementById('settingsMsg');
+  const latI = document.getElementById('homeLat');
+  const lonI = document.getElementById('homeLon');
+  const tzI  = document.getElementById('homeTz');
+  const calI = document.getElementById('calUrl');
+
+  function note(t, ok=false){ msg.textContent = t; msg.className = ok ? 'ok' : 'err'; }
+
+  // Load saved home
+  document.getElementById('btnLoadHome').onclick = async ()=>{
+    try{
+      const r = await fetch('/prefs/home');
+      if(!r.ok){ note('No saved home yet.', false); return; }
+      const j = await r.json();
+      latI.value = j.lat; lonI.value = j.lon; tzI.value = j.tz || '';
+      note('Loaded home.', true);
+    }catch(e){ note('Failed to load home.', false); }
+  };
+
+  // Use current device location
+  document.getElementById('btnUseLoc').onclick = async ()=>{
+    try{
+      const pos = await new Promise((res,rej)=>
+        navigator.geolocation.getCurrentPosition(res,rej,{enableHighAccuracy:true,timeout:8000})
+      );
+      latI.value = pos.coords.latitude.toFixed(6);
+      lonI.value = pos.coords.longitude.toFixed(6);
+      if(!tzI.value) tzI.value = 'America/Los_Angeles';
+      note('Filled from device location.', true);
+    }catch(e){ note('Location permission denied or unavailable.', false); }
+  };
+
+  // Save home
+  document.getElementById('btnSaveHome').onclick = async ()=>{
+    const lat = parseFloat(latI.value), lon = parseFloat(lonI.value), tz = tzI.value.trim() || null;
+    if(Number.isNaN(lat) || Number.isNaN(lon)){ note('Enter numeric lat/lon.', false); return; }
+    try{
+      const r = await fetch('/prefs/home',{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({lat, lon, tz})
+      });
+      if(!r.ok){ note('Save failed: ' + await r.text(), false); return; }
+      note('Home saved.', true);
+    }catch(e){ note('Save failed.', false); }
+  };
+
+  // Load saved calendar
+  document.getElementById('btnLoadCal').onclick = async ()=>{
+    try{
+      const r = await fetch('/prefs/calendar');
+      if(!r.ok){ note('No calendar saved yet.', false); return; }
+      const j = await r.json();
+      calI.value = j.ics_url || '';
+      note('Loaded calendar.', true);
+    }catch(e){ note('Failed to load calendar.', false); }
+  };
+
+  // Save calendar
+  document.getElementById('btnSaveCal').onclick = async ()=>{
+    const ics_url = calI.value.trim();
+    if(!ics_url){ note('Enter an ICS URL.', false); return; }
+    try{
+      const r = await fetch('/prefs/calendar',{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ics_url})
+      });
+      if(!r.ok){ note('Save failed: ' + await r.text(), false); return; }
+      note('Calendar saved.', true);
+    }catch(e){ note('Save failed.', false); }
+  };
+
+  // Try to pre-fill settings on load (non-fatal)
+  document.getElementById('btnLoadHome').click();
+  document.getElementById('btnLoadCal').click();
 })();
 </script>
-
-<h1>News search</h1>
-<form id="search">
-  <div class="row">
-    <input name="topic" id="topic" placeholder="e.g., Padres or Taylor Swift" required style="flex:1">
-    <button id="searchBtn">Search</button>
-  </div>
-</form>
-<div class="row">
-  <button id="save" disabled>Save current topic</button>
-  <button id="show">Show my feed</button>
-</div>
-<div id="status" style="min-height:1.2rem"></div>
-<h2>Study helper</h2>
-<textarea id="q" rows="4" class="box" placeholder="Ask a study question, e.g., 'Workup of painless jaundice in a 60-year-old'"></textarea>
-<div class="row"><button id="ask">Ask</button></div>
-<pre id="studyOut" class="box"></pre>
-
-<script>
-document.querySelector('#ask').addEventListener('click', async ()=>{
-  const q = document.querySelector('#q').value.trim();
-  const out = document.querySelector('#studyOut');
-  if(!q){ out.textContent = 'Type a question first.'; return; }
-  out.textContent = 'Thinking…';
-  const r = await fetch('/study/ask', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({question:q})
-  });
-  if(!r.ok){ out.textContent = 'Server error: ' + await r.text(); return; }
-  const j = await r.json();
-  out.textContent = j.answer || '(no answer)';
-});
-</script>
-
-<h2>Results</h2>
-<pre id="out" class="box"></pre>
-
-<h2>My topics</h2>
-<div id="topics" class="box"></div>
-
-<h2>My feed</h2>
-<div id="feed" class="box"></div>
-
-<script>
-const $ = s => document.querySelector(s);
-const out = $('#out'), feed = $('#feed'), topicsBox = $('#topics'), status = $('#status'), saveBtn = $('#save');
-let lastTopic = null;
-
-async function getPrefs(){ const r = await fetch('/prefs/news'); return await r.json(); }
-async function savePrefs(topics){
-  const r = await fetch('/prefs/news',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topics})});
-  return await r.json();
-}
-function showTopics(list){
-  const items = list || [];
-  topicsBox.innerHTML = items.length
-    ? items.map(t=>`<span class="pill">${t}<button aria-label="Remove ${t}" data-del="${t}">×</button></span>`).join(' ')
-    : 'No topics saved yet.';
-}
-
-$('#search').addEventListener('submit', async (e)=>{
-  e.preventDefault();
-  const topic = new FormData(e.target).get('topic').trim();
-  if(!topic) return;
-  lastTopic = topic;
-  saveBtn.disabled = false;
-  status.textContent = `Searched: ${topic}`;
-  const r = await fetch('/news?topic='+encodeURIComponent(topic));
-  out.textContent = JSON.stringify(await r.json(), null, 2);
-});
-
-saveBtn.addEventListener('click', async ()=>{
-  if(!lastTopic) return;
-  const prefs = await getPrefs(); const set = new Set(prefs.topics || []); set.add(lastTopic);
-  const saved = Array.from(set);
-  await savePrefs(saved);
-  showTopics(saved);
-  status.textContent = `Saved topic: ${lastTopic}`;
-});
-
-$('#show').addEventListener('click', async ()=>{
-  const r = await fetch('/news/for-me'); const j = await r.json();
-  if(!j.buckets?.length){ feed.textContent = 'No saved topics yet.'; return; }
-  feed.innerHTML = j.buckets.map(b=>{
-    const lines = (b.articles||[]).map(a=>`• ${a.title}\n  ${a.link}`).join('\n');
-    return `# ${b.topic}\n${lines}`;
-  }).join('\n\n');
-});
-
-topicsBox.addEventListener('click', async (e)=>{
-  const t = e.target?.dataset?.del;
-  if(!t) return;
-  const prefs = await getPrefs();
-  const saved = (prefs.topics || []).filter(x => x !== t);
-  await savePrefs(saved);
-  showTopics(saved);
-  status.textContent = `Removed topic: ${t}`;
-});
-
-
-// Remove topic via (×)
-topicsBox.addEventListener('click', async (e)=>{
-  const t = e.target?.dataset?.del;
-  if(!t) return;
-  const prefs = await getPrefs();
-  const saved = (prefs.topics || []).filter(x => x !== t);
-  await savePrefs(saved);
-  showTopics(saved);
-  status.textContent = `Removed topic: ${t}`;
-});
-
-// initial load of saved topics
-getPrefs().then(p=>showTopics(p.topics||[])).catch(()=>showTopics([]));
-</script>
-
-
+</body>
+</html>
