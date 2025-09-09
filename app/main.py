@@ -1,19 +1,37 @@
-from pathlib import Path
+# app/main.py
+import os
 from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse, PlainTextResponse
+from fastapi.responses import RedirectResponse, PlainTextResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-# --- create app first ---
-app = FastAPI()
+app = FastAPI(title="Personal Agent")
 
-# --- paths ---
-BASE_DIR = Path(__file__).resolve().parent.parent
-STATIC_DIR = BASE_DIR / "static"
-TEMPLATES_DIR = BASE_DIR / "templates"
-STATIC_DIR.mkdir(parents=True, exist_ok=True)
+# ---------- Static & templates ----------
+BASE_DIR = os.path.dirname(__file__)
 
-# --- root + Render HEAD probe ---
+static_dir = os.path.join(BASE_DIR, "static")
+if os.path.isdir(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+templates_dir = os.path.join(BASE_DIR, "templates")
+templates = Jinja2Templates(directory=templates_dir)
+
+# ---------- Routers (optional imports so we don't crash) ----------
+def _try_include(module_path: str, attr: str = "router") -> None:
+    try:
+        module = __import__(module_path, fromlist=[attr])
+        app.include_router(getattr(module, attr))
+    except Exception:
+        # If a router doesn't exist or fails to import, skip quietly.
+        pass
+
+_try_include("routers.news")
+_try_include("routers.prefs")
+_try_include("routers.study")
+_try_include("routers.report")
+
+# ---------- Basic routes ----------
 @app.get("/", include_in_schema=False)
 def home():
     return RedirectResponse("/ui")
@@ -22,27 +40,11 @@ def home():
 def home_head():
     return PlainTextResponse("")
 
-# --- routers (import after app exists) ---
-from routers.news import router as news_router
-from routers.prefs import router as prefs_router
-from routers.study import router as study_router
-from routers.report import router as report_router
-
-app.include_router(news_router)
-app.include_router(prefs_router)
-app.include_router(study_router)
-app.include_router(report_router)
-
-# --- UI + health ---
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
-
-@app.get("/ui")
+@app.get("/ui", response_class=HTMLResponse, include_in_schema=False)
 def ui(request: Request):
+    # index.html should live in app/templates/
     return templates.TemplateResponse("index.html", {"request": request})
 
-@app.get("/healthz")
+@app.get("/healthz", tags=["default"])
 def healthz():
     return {"status": "ok"}
-
-
