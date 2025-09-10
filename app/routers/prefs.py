@@ -1,134 +1,90 @@
-# app/routers/prefs.py
-from fastapi import APIRouter, HTTPException, Body
-from pydantic import BaseModel, AnyHttpUrl
-from typing import Any, Dict, List, Optional
-import os, json
+import json, os
+from typing import Dict, Any, List, Optional
+from fastapi import APIRouter, HTTPException
 
 router = APIRouter(prefix="/prefs", tags=["prefs"])
 
-# ---------- simple file persistence ----------
-DATA_DIR  = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
-DATA_FILE = os.path.join(DATA_DIR, "prefs.json")
+DATA_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "prefs.json"))
+os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
 
-def _ensure_file() -> None:
-    os.makedirs(DATA_DIR, exist_ok=True)
+def _load() -> Dict[str, Any]:
     if not os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump({"topics": [], "home": {}, "calendar": {}}, f)
-
-def _read() -> Dict[str, Any]:
-    _ensure_file()
+        return {"topics": [], "home": {}, "calendar": {}}
     with open(DATA_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+        try:
+            return json.load(f)
+        except Exception:
+            return {"topics": [], "home": {}, "calendar": {}}
 
-def _write(d: Dict[str, Any]) -> None:
-    os.makedirs(DATA_DIR, exist_ok=True)
+def _save(d: Dict[str, Any]) -> None:
+    os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(d, f, indent=2)
 
-def _mask_ics(url: str) -> str:
-    if not url:
-        return ""
-    parts = url.split("/private-", 1)
-    if len(parts) == 2:
-        return parts[0] + "/private-********/basic.ics"
-    return url.split("?")[0].split("#")[0][:30] + "…"
-
-# ---------- models ----------
-class HomePrefIn(BaseModel):
-    zip: Optional[str] = None
-    city: Optional[str] = None
-    tz: Optional[str] = None
-    lat: Optional[float] = None
-    lon: Optional[float] = None
-    units: Optional[str] = None  # "imperial" | "metric"
-
-class CalendarPrefIn(BaseModel):
-    ics_url: AnyHttpUrl
-
-# ---------- NEWS ----------
+# ---- News topics ----
 @router.get("/news")
 def get_news_prefs():
-    d = _read()
-    return {"topics": d.get("topics", [])}
+    return {"topics": _load().get("topics", [])}
 
 @router.post("/news")
-def upsert_news(body: Dict[str, Any] = Body(...)):
-    """
-    Accepts:
-      - {"topic": "Padres"} -> append (de-duped)
-      - {"topics": ["A","B"]} -> replace list
-    """
-    d = _read()
-    topics: List[str] = d.get("topics", [])
-
-    def norm(s: Any) -> str:
-        return str(s).strip()
-
-    if "topic" in body:
-        t = norm(body["topic"])
-        if not t:
-            raise HTTPException(status_code=400, detail="Empty topic.")
-        # de-dupe case-insensitive but preserve original case
-        if t.lower() not in [x.lower() for x in topics]:
-            topics.append(t)
-        d["topics"] = topics
-        _write(d)
-        return {"ok": True, "mode": "added", "topics": topics}
-
-    if "topics" in body and isinstance(body["topics"], list):
-        seen, uniq = set(), []
-        for raw in body["topics"]:
-            t = norm(raw)
-            if t and t.lower() not in seen:
-                seen.add(t.lower())
-                uniq.append(t)
-        d["topics"] = uniq
-        _write(d)
-        return {"ok": True, "mode": "replaced", "topics": uniq}
-
-    raise HTTPException(status_code=400, detail="Provide 'topic' or 'topics' list.")
+def upsert_news(payload: Dict[str, List[str]]):
+    topics = payload.get("topics", [])
+    if not isinstance(topics, list):
+        raise HTTPException(status_code=400, detail="topics must be a list[str]")
+    d = _load()
+    merged = list(dict.fromkeys([*d.get("topics", []), *[t for t in topics if t]]))
+    d["topics"] = merged
+    _save(d)
+    return {"ok": True, "topics": merged}
 
 @router.delete("/news/{topic}")
 def remove_topic(topic: str):
-    d = _read()
-    old = d.get("topics", [])
-    remain = [t for t in old if t.lower() != topic.strip().lower()]
-    d["topics"] = remain
-    _write(d)
-    return {"ok": True, "removed": topic, "topics": remain}
+    d = _load()
+    d["topics"] = [t for t in d.get("topics", []) if t.lower() != (topic or "").lower()]
+    _save(d)
+    return {"ok": True, "topics": d["topics"]}
 
-# ---------- HOME ----------
+# ---- Home (location + units + tz) ----
 @router.get("/home")
 def get_home():
-    d = _read()
-    return d.get("home", {})
+    return {"home": _load().get("home", {})}
 
 @router.post("/home")
-@router.post("/set_home")  # alias for older UI
-def set_home(payload: HomePrefIn):
-    d = _read()
-    home = d.get("home", {})
-    for k, v in payload.model_dump(exclude_unset=True).items():
-        if v is None:
-            continue
-        home[k] = v
+def set_home(payload: Dict[str, Any]):
+    allowed = {"city", "zip", "lat", "lon", "tz", "units"}
+    if not any(k in payload for k in allowed):
+        raise HTTPException(status_code=400, detail="provide city or zip (and optional tz, units)")
+    d = _load()
+    home = d.get("home", {}) or {}
+    home.update({k: v for k, v in payload.items() if k in allowed and v is not None})
+    # sanity
+    if "units" in home and str(home["units"]).lower() not in ("imperial", "metric"):
+        home["units"] = "imperial"
     d["home"] = home
-    _write(d)
+    _save(d)
     return {"ok": True, "home": home}
 
-# ---------- CALENDAR ----------
+@router.post("/set_home")
+def set_home_alias(payload: Dict[str, Any]):
+    return set_home(payload)
+
+# ---- Calendar (ICS URL) ----
 @router.get("/calendar")
 def get_calendar():
-    d = _read()
-    ics_url = d.get("calendar", {}).get("ics_url", "")
-    return {"configured": bool(ics_url), "ics_masked": _mask_ics(ics_url) if ics_url else ""}
+    return {"calendar": _load().get("calendar", {})}
 
 @router.post("/calendar")
-@router.post("/set_calendar")  # alias for older UI
-def set_calendar(payload: CalendarPrefIn):
-    d = _read()
-    d["calendar"] = {"ics_url": str(payload.ics_url)}
-    _write(d)
-    return {"ok": True, "calendar": {"ics_masked": _mask_ics(str(payload.ics_url))}}
+def set_calendar(payload: Dict[str, Any]):
+    url = (payload.get("ics_url") or payload.get("url") or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="ics_url is required")
+    d = _load()
+    d["calendar"] = {"ics_url": url}
+    _save(d)
+    return {"ok": True, "calendar": d["calendar"]}
+
+@router.post("/set_calendar")
+def set_calendar_alias(payload: Dict[str, Any]):
+    return set_calendar(payload)
+
 

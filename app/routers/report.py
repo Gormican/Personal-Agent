@@ -5,18 +5,21 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import os, json, io
 
+from ..services.weather import get_weather_summary
+from ..services.calendar import get_today_events
+
 router = APIRouter(prefix="/report", tags=["report"])
 
-# ---- Prefs storage (same file used by prefs.py) ----
-DATA_FILE = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "data", "prefs.json")
-)
+DATA_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "prefs.json"))
 
 def _load_prefs() -> Dict[str, Any]:
     if not os.path.exists(DATA_FILE):
         return {"topics": [], "home": {}, "calendar": {}}
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"topics": [], "home": {}, "calendar": {}}
 
 def _today_str(tz: str | None) -> str:
     try:
@@ -29,7 +32,6 @@ def _today_str(tz: str | None) -> str:
 def _calendar_connected(cal: Dict[str, Any]) -> bool:
     if not cal:
         return False
-    # Accept multiple possible keys to match how it may have been saved
     for k in ("ics_url", "url", "ics", "calendar_url"):
         v = cal.get(k)
         if isinstance(v, str) and v.strip():
@@ -45,14 +47,33 @@ def _build_morning_text(prefs: Dict[str, Any]) -> str:
     units = (home.get("units") or "imperial").lower()
     place = home.get("city") or (f"ZIP {home.get('zip')}" if home.get("zip") else "your area")
 
-    lines = [
-        f"Good morning. Here’s your report for { _today_str(tz) }.",
-        "Your calendar is connected." if _calendar_connected(cal) else "No calendar connected yet.",
-        f"Weather for {place}: details unavailable right now ({'metric' if units=='metric' else 'imperial'}).",
-        "Your topics: " + ", ".join(topics) + "." if topics else "No news topics saved yet.",
-        "",
-        "(Note: smart summary unavailable.)",
-    ]
+    weather_s = get_weather_summary(home)
+    cal_lines = get_today_events(cal, tz)
+
+    lines = [f"Good morning. Here’s your report for { _today_str(tz) }."]
+    # Calendar
+    if _calendar_connected(cal):
+        if cal_lines:
+            lines.append("Today’s calendar:")
+            lines.extend([f"• {x}" for x in cal_lines])
+        else:
+            lines.append("Your calendar is connected (no events today).")
+    else:
+        lines.append("No calendar connected yet.")
+
+    # Weather
+    if weather_s:
+        lines.append(f"Weather for {place}: {weather_s}.")
+    else:
+        lines.append(f"Weather for {place}: unavailable right now ({'metric' if units=='metric' else 'imperial'}).")
+
+    # Topics
+    if topics:
+        lines.append("Your topics: " + ", ".join(topics) + ".")
+    else:
+        lines.append("No news topics saved yet.")
+
+    lines += ["", "(Note: smart summary unavailable.)"]
     return "\n".join(lines).strip()
 
 @router.get("/morning")
@@ -71,12 +92,10 @@ def morning_speak(smart: bool = True):
         raise HTTPException(status_code=400, detail="TTS requires OPENAI_API_KEY.")
 
     try:
-        # Import inside so a missing package won’t block router registration
         from openai import OpenAI
         client = OpenAI(api_key=api_key)
 
-        # NOTE: no `format=` argument; current SDK defaults to WAV bytes.
-        # If you later want MP3, we can use the Responses API audio block or re-encode server-side.
+        # current SDK: no format kw; returns WAV bytes
         speech = client.audio.speech.create(
             model="gpt-4o-mini-tts",
             voice="alloy",
@@ -87,10 +106,8 @@ def morning_speak(smart: bool = True):
     except ImportError:
         raise HTTPException(status_code=500, detail="OpenAI client not installed on server.")
     except Exception as e:
-        # Surface exact TTS errors (e.g., quota, wrong arg) back to UI
         raise HTTPException(status_code=500, detail=f"TTS error: {e}")
 
-    # Serve as WAV since that's the SDK's default output
     return StreamingResponse(
         io.BytesIO(audio_bytes),
         media_type="audio/wav",
@@ -99,3 +116,4 @@ def morning_speak(smart: bool = True):
             "Cache-Control": "no-store",
         },
     )
+

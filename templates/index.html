@@ -1,205 +1,121 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
 <head>
-  <meta charset="utf-8">
+  <meta charset="utf-8"/>
   <title>Personal Agent</title>
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Arial, sans-serif; margin: 2rem; line-height: 1.45; }
-    h1, h2 { margin-top: 1.2rem; }
-    .row { display: flex; gap: .5rem; align-items: center; margin: .5rem 0; flex-wrap: wrap; }
-    .box { border: 1px solid #ccc; padding: .7rem; border-radius: 8px; margin: .4rem 0; white-space: pre-wrap; }
-    input[type="text"], input[type="url"], input[type="number"] { flex: 1; min-width: 220px; padding: .5rem .6rem; border: 1px solid #ccc; border-radius: 6px; }
-    button { padding: .45rem .7rem; border: 1px solid #bbb; border-radius: 6px; background: #fff; cursor: pointer; }
-    button:hover { background: #f7f7f7; }
-    .muted { color: #777; font-size: .9em; }
-    .ok { color: #137333; }
-    .err { color: #b00020; }
-    @media (max-width: 520px) { body { margin: 1rem; } }
+    body { font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial; max-width: 900px; margin: 20px auto; }
+    h2 { margin-top: 28px; }
+    input[type=text] { width: 420px; padding: 6px; }
+    button { padding: 6px 10px; margin-left: 6px; }
+    .pill { display:inline-block; padding:4px 8px; border:1px solid #ddd; border-radius:12px; margin:3px; }
+    #status { margin: 10px 0; color: #555; }
+    pre { background:#f7f7f7; padding:10px; border-radius:6px; white-space:pre-wrap; }
   </style>
 </head>
 <body>
   <h1>Personal Agent</h1>
+  <div id="status"></div>
 
-  <!-- Morning report -->
-  <h2>Morning report</h2>
-  <label><input type="checkbox" id="mrSmart"> Smart summary</label>
-  <div class="row">
-    <button id="mrPlay" type="button">▶ Play Morning Report</button>
-  </div>
-  <audio id="mrAudio" controls class="box"></audio>
-  <pre id="mrText" class="box"></pre>
-
-  <!-- Current topics chosen -->
   <h2>Current Topics Chosen</h2>
-  <div id="topicsBox" class="box"></div>
+  <div id="topics"></div>
 
-  <!-- Add new topics -->
   <h2>Add New Topics</h2>
-  <div class="row">
-    <input id="topicNew" type="text" placeholder="e.g., Padres, Taylor Swift, CRISPR">
-    <button id="addTopic">Add topic</button>
+  <input id="topic" type="text" placeholder="e.g., Padres or Taylor Swift"/>
+  <button onclick="addTopic()">Add</button>
+
+  <h2>Home location</h2>
+  <div>
+    City or ZIP: <input id="cityzip" type="text" placeholder="e.g., Coronado or 92118"/>
+    Timezone: <input id="tz" type="text" placeholder="America/Los_Angeles"/>
+    Units: <input id="units" type="text" placeholder="imperial or metric"/>
+    <button onclick="saveHome()">Save</button>
+  </div>
+  <div style="margin-top:8px;font-size:13px;color:#666">Tip: only fill what you know; you can update later.</div>
+
+  <h2>Calendar</h2>
+  <div>
+    Secret ICS URL: <input id="ics" type="text" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics"/>
+    <button onclick="saveCal()">Save calendar</button>
   </div>
 
-  <!-- Settings -->
-  <h2>Settings</h2>
-  <div id="settingsMsg" class="muted"></div>
-
-  <div class="box">
-    <strong>Home location</strong>
-    <div class="row">
-      <input id="homeQuery" type="text" placeholder="City or ZIP (e.g., Coronado or 92118)">
-      <button id="btnSaveHome">Lookup & Save</button>
-      <button id="btnLoadHome">Load saved</button>
-    </div>
-    <div id="homeSaved" class="muted"></div>
+  <h2>Morning report</h2>
+  <div>
+    <button onclick="getReport()">Get text</button>
+    <button onclick="speakReport()">Speak</button>
   </div>
+  <pre id="report"></pre>
+  <audio id="audio" controls style="display:none"></audio>
 
-  <div class="box">
-    <strong>Calendar</strong>
-    <div class="row">
-      <input id="calUrl" type="url" placeholder="Google Calendar → Settings → Integrate → Secret iCal (.ics) URL">
-      <button id="btnSaveCal">Save calendar</button>
-      <button id="btnLoadCal">Load saved</button>
-    </div>
-    <div class="muted">Tip: In Google Calendar web → ⚙ Settings → select your calendar → Integrate calendar → copy <em>Secret address in iCal format</em> and paste here.</div>
-  </div>
-
-  <!-- Study helper (bottom) -->
   <h2>Study helper</h2>
-  <div class="row">
-    <input id="studyQ" type="text" placeholder="Ask a study question…">
-    <button id="studyAsk">Ask</button>
-  </div>
-  <pre id="studyA" class="box"></pre>
+  <textarea id="question" rows="4" style="width:100%" placeholder="What is the workup of jaundice?"></textarea><br/>
+  <button onclick="ask()">Ask</button>
+  <pre id="answer"></pre>
 
 <script>
-(async function(){
-  // ---------- Topics ----------
-  const topicsBox = document.getElementById('topicsBox');
-  const settingsMsg = document.getElementById('settingsMsg');
-  function note(t, ok=false){ settingsMsg.textContent = t; settingsMsg.className = ok ? 'ok' : 'err'; }
+const $ = sel => document.querySelector(sel);
+const setStatus = s => $('#status').textContent = s || '';
 
-  async function loadTopics(){
-    try{
-      const r = await fetch('/prefs/news');
-      if(!r.ok){ topicsBox.textContent='(none)'; return; }
-      const topics = (await r.json()).topics || [];
-      renderTopics(topics);
-    }catch{ topicsBox.textContent='(none)'; }
-  }
-  function renderTopics(topics){
-    if(!topics.length){ topicsBox.textContent='(none)'; return; }
-    topicsBox.innerHTML = topics.map(t =>
-      `<div>${t} <button onclick="removeTopic('${t}')">✖</button></div>`
-    ).join('');
-  }
-  window.removeTopic = async (topic)=>{
-    try{
-      const r = await fetch('/prefs/news');
-      let topics = r.ok ? (await r.json()).topics || [] : [];
-      topics = topics.filter(x=>x!==topic);
-      const s = await fetch('/prefs/news',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topics})});
-      if(s.ok) renderTopics((await s.json()).topics);
-    }catch{}
-  };
-  document.getElementById('addTopic').onclick = async ()=>{
-    const val = document.getElementById('topicNew').value.trim();
-    if(!val) return;
-    try{
-      const r = await fetch('/prefs/news');
-      let topics = r.ok ? (await r.json()).topics || [] : [];
-      if(!topics.includes(val)) topics.push(val);
-      const s = await fetch('/prefs/news',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topics})});
-      if(s.ok){ renderTopics((await s.json()).topics); document.getElementById('topicNew').value=''; }
-    }catch{}
-  };
-  loadTopics();
+async function refreshTopics(){
+  const r = await fetch('/prefs/news'); const j = await r.json();
+  const div = $('#topics'); div.innerHTML='';
+  (j.topics||[]).forEach(t=>{
+    const span=document.createElement('span'); span.className='pill'; span.textContent=t+' ×';
+    span.style.cursor='pointer'; span.onclick=()=>removeTopic(t); div.appendChild(span);
+  });
+}
 
-  // ---------- Study helper ----------
-  document.getElementById('studyAsk').onclick = async ()=>{
-    const q = document.getElementById('studyQ').value.trim();
-    if(!q) return;
-    const out = document.getElementById('studyA');
-    out.textContent = 'Thinking…';
-    const r = await fetch('/study/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});
-    out.textContent = r.ok ? (await r.json()).answer : ('Error: ' + await r.text());
-  };
+async function addTopic(){
+  const t = $('#topic').value.trim(); if(!t) return;
+  setStatus('Saving topic…');
+  await fetch('/prefs/news',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({topics:[t]})});
+  $('#topic').value=''; await refreshTopics(); setStatus('Saved.');
+}
 
-  // ---------- Morning report ----------
-  const audio = document.getElementById('mrAudio');
-  const textBox = document.getElementById('mrText');
-  const smartBox = document.getElementById('mrSmart');
-  document.getElementById('mrPlay').onclick = async ()=>{
-    const params = new URLSearchParams();
-    if (smartBox.checked) params.set('smart','true');
-    const qs = params.toString();
-    const textUrl = '/report/morning' + (qs?('?'+qs):'');
-    const audioUrl = '/report/morning/speak' + (qs?('?'+qs):'');
+async function removeTopic(t){
+  setStatus('Removing topic…');
+  await fetch('/prefs/news/'+encodeURIComponent(t),{method:'DELETE'}); await refreshTopics(); setStatus('Removed.');
+}
 
-    textBox.textContent = 'Preparing your report…';
-    const r1 = await fetch(textUrl);
-    if(r1.ok){ textBox.textContent = (await r1.json()).text; }
+async function saveHome(){
+  const payload={};
+  const cz=$('#cityzip').value.trim(); if(cz){ if(/^\d{4,6}$/.test(cz)) payload.zip=cz; else payload.city=cz; }
+  const tz=$('#tz').value.trim(); if(tz) payload.tz=tz;
+  const units=$('#units').value.trim(); if(units) payload.units=units;
+  setStatus('Saving home…');
+  const r=await fetch('/prefs/home',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  setStatus(r.ok?'Home saved.':'Save failed.'); 
+}
 
-    const r = await fetch(audioUrl);
-    if(!r.ok){ textBox.textContent += '\n\nAudio error: ' + await r.text(); return; }
-    const buf = await r.arrayBuffer();
-    audio.src = URL.createObjectURL(new Blob([buf], {type:'audio/mpeg'}));
-    audio.play();
-  };
+async function saveCal(){
+  const ics=$('#ics').value.trim(); if(!ics) return;
+  setStatus('Saving calendar…');
+  const r=await fetch('/prefs/calendar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ics_url:ics})});
+  setStatus(r.ok?'Calendar saved.':'Save failed.');
+  if(r.ok) $('#ics').value='';
+}
 
-  // ---------- Settings: Home by city/ZIP ----------
-  const homeSaved = document.getElementById('homeSaved');
-  document.getElementById('btnLoadHome').onclick = async ()=>{
-    try{
-      const r = await fetch('/prefs/home');
-      if(!r.ok){ homeSaved.textContent='No saved home yet.'; return; }
-      const j = await r.json();
-      homeSaved.textContent = `Saved home: ${j.lat.toFixed(3)}, ${j.lon.toFixed(3)} (${j.tz||'tz n/a'})`;
-    }catch{ homeSaved.textContent='(load failed)'; }
-  };
-  document.getElementById('btnSaveHome').onclick = async ()=>{
-    const q = document.getElementById('homeQuery').value.trim();
-    if(!q){ note('Enter a city or ZIP.', false); return; }
-    try{
-      // Open-Meteo geocoding (no key required)
-      const url = 'https://geocoding-api.open-meteo.com/v1/search?count=1&language=en&format=json&name='+encodeURIComponent(q);
-      const g = await fetch(url);
-      if(!g.ok){ note('Lookup failed.', false); return; }
-      const J = await g.json();
-      const r = (J.results && J.results[0]) || null;
-      if(!r){ note('No match found.', false); return; }
-      const payload = { lat: r.latitude, lon: r.longitude, tz: r.timezone || 'America/Los_Angeles' };
-      const s = await fetch('/prefs/home',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-      if(!s.ok){ note('Save failed: ' + await s.text(), false); return; }
-      note(`Home saved: ${r.name || q} → ${payload.lat.toFixed(3)}, ${payload.lon.toFixed(3)} (${payload.tz})`, true);
-      document.getElementById('btnLoadHome').click();
-    }catch(e){ note('Lookup error.', false); }
-  };
-  // try to show current saved home on load
-  document.getElementById('btnLoadHome').click();
+async function getReport(){
+  setStatus('Preparing report…');
+  const r=await fetch('/report/morning'); const j=await r.json();
+  $('#report').textContent=j.text||JSON.stringify(j,null,2); setStatus('');
+}
 
-  // ---------- Settings: Calendar ICS ----------
-  const calI = document.getElementById('calUrl');
-  document.getElementById('btnLoadCal').onclick = async ()=>{
-    try{
-      const r = await fetch('/prefs/calendar');
-      if(!r.ok){ note('No calendar saved yet.', false); return; }
-      const j = await r.json();
-      calI.value = j.ics_url || '';
-      note('Loaded calendar.', true);
-    }catch{ note('Failed to load calendar.', false); }
-  };
-  document.getElementById('btnSaveCal').onclick = async ()=>{
-    const ics_url = calI.value.trim();
-    if(!ics_url){ note('Paste your iCal (.ics) URL from Google Calendar Settings.', false); return; }
-    try{
-      const r = await fetch('/prefs/calendar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ics_url})});
-      if(!r.ok){ note('Save failed: ' + await r.text(), false); return; }
-      note('Calendar saved.', true);
-    }catch{ note('Save failed.', false); }
-  };
-  document.getElementById('btnLoadCal').click();
-})();
+async function speakReport(){
+  setStatus('Preparing audio…');
+  const r=await fetch('/report/morning/speak');
+  if(!r.ok){ const j=await r.json().catch(()=>({})); $('#report').textContent='Audio error: '+JSON.stringify(j); setStatus(''); return; }
+  const blob=await r.blob(); const url=URL.createObjectURL(blob);
+  const a=$('#audio'); a.src=url; a.style.display='block'; a.play(); setStatus('');
+}
+
+async function ask(){
+  const q=$('#question').value.trim(); if(!q) return;
+  $('#answer').textContent='Thinking…';
+  const r=await fetch('/study/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});
+  const j=await r.json(); $('#answer').textContent=j.answer||JSON.stringify(j,null,2);
+}
+refreshTopics();
 </script>
 </body>
 </html>

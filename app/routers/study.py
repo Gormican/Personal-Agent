@@ -15,14 +15,13 @@ def ask(payload: AskIn):
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        # local, safe fallback
         return {
             "answer": (
-                "I don’t have an API key configured, so here’s a structured way to study:\n"
-                "1) Identify the key vocabulary/terms in the question.\n"
-                "2) Write a 2–3 step outline of the mechanism or reasoning.\n"
-                "3) State the final conclusion in one sentence.\n"
-                "Enable OPENAI_API_KEY for AI-generated answers."
+                "No API key configured, so here’s a quick study scaffold:\n"
+                "• Identify terms and definitions.\n"
+                "• Outline the mechanism or steps.\n"
+                "• Conclude in one sentence.\n"
+                "Set OPENAI_API_KEY to enable AI-generated answers."
             )
         }
 
@@ -32,13 +31,13 @@ def ask(payload: AskIn):
         resp = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a study helper. Be concise and correct. Prefer outlines and bullet points."},
+                {"role": "system", "content": "You are a study helper. Be concise and correct. Prefer bullet points."},
                 {"role": "user", "content": q},
             ],
             temperature=0.2,
             max_tokens=300,
         )
-        text = resp.choices[0].message.content
-        return {"answer": text}
+        return {"answer": resp.choices[0].message.content}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Study helper error: {e}")
+
