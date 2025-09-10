@@ -26,6 +26,16 @@ def _today_str(tz: str | None) -> str:
         pass
     return datetime.now().strftime("%A, %B %d")
 
+def _calendar_connected(cal: Dict[str, Any]) -> bool:
+    if not cal:
+        return False
+    # Accept multiple possible keys to match how it may have been saved
+    for k in ("ics_url", "url", "ics", "calendar_url"):
+        v = cal.get(k)
+        if isinstance(v, str) and v.strip():
+            return True
+    return False
+
 def _build_morning_text(prefs: Dict[str, Any]) -> str:
     home = prefs.get("home", {}) or {}
     cal  = prefs.get("calendar", {}) or {}
@@ -37,7 +47,7 @@ def _build_morning_text(prefs: Dict[str, Any]) -> str:
 
     lines = [
         f"Good morning. Here’s your report for { _today_str(tz) }.",
-        "Your calendar is connected." if cal.get("ics_url") else "No calendar connected yet.",
+        "Your calendar is connected." if _calendar_connected(cal) else "No calendar connected yet.",
         f"Weather for {place}: details unavailable right now ({'metric' if units=='metric' else 'imperial'}).",
         "Your topics: " + ", ".join(topics) + "." if topics else "No news topics saved yet.",
         "",
@@ -61,27 +71,31 @@ def morning_speak(smart: bool = True):
         raise HTTPException(status_code=400, detail="TTS requires OPENAI_API_KEY.")
 
     try:
-        # Import here so a missing package won’t block router registration
+        # Import inside so a missing package won’t block router registration
         from openai import OpenAI
         client = OpenAI(api_key=api_key)
 
+        # NOTE: no `format=` argument; current SDK defaults to WAV bytes.
+        # If you later want MP3, we can use the Responses API audio block or re-encode server-side.
         speech = client.audio.speech.create(
             model="gpt-4o-mini-tts",
             voice="alloy",
             input=text,
-            format="mp3",
         )
         audio_bytes = speech.read()
+
     except ImportError:
         raise HTTPException(status_code=500, detail="OpenAI client not installed on server.")
     except Exception as e:
+        # Surface exact TTS errors (e.g., quota, wrong arg) back to UI
         raise HTTPException(status_code=500, detail=f"TTS error: {e}")
 
+    # Serve as WAV since that's the SDK's default output
     return StreamingResponse(
         io.BytesIO(audio_bytes),
-        media_type="audio/mpeg",
+        media_type="audio/wav",
         headers={
-            "Content-Disposition": 'inline; filename="morning.mp3"',
+            "Content-Disposition": 'inline; filename="morning.wav"',
             "Cache-Control": "no-store",
         },
     )
