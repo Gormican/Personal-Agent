@@ -1,5 +1,5 @@
 # app/main.py
-import os
+from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse, PlainTextResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -7,44 +7,62 @@ from fastapi.templating import Jinja2Templates
 
 app = FastAPI(title="Personal Agent")
 
-# ---------- Static & templates ----------
-BASE_DIR = os.path.dirname(__file__)
+BASE_DIR = Path(__file__).resolve().parent        # .../app
+REPO_ROOT = BASE_DIR.parent                       # repo root
+TEMPLATES_DIR = REPO_ROOT / "templates"           # root/templates
 
-static_dir = os.path.join(BASE_DIR, "static")
-if os.path.isdir(static_dir):
-    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+# ---- optional static (root/static preferred, else app/static) ----
+for cand in (REPO_ROOT / "static", BASE_DIR / "static"):
+    if cand.is_dir():
+        app.mount("/static", StaticFiles(directory=str(cand)), name="static")
+        break
 
-templates_dir = os.path.join(BASE_DIR, "templates")
-templates = Jinja2Templates(directory=templates_dir)
+# ---- templates (root/templates) ----
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
-# ---------- Routers (optional imports so we don't crash) ----------
-def _try_include(module_path: str, attr: str = "router") -> None:
-    try:
-        module = __import__(module_path, fromlist=[attr])
-        app.include_router(getattr(module, attr))
-    except Exception:
-        # If a router doesn't exist or fails to import, skip quietly.
-        pass
+# ---- routers (import from app.routers) ----
+try:
+    from .routers.prefs import router as prefs_router
+    app.include_router(prefs_router)
+except Exception:
+    pass
 
-_try_include("routers.news")
-_try_include("routers.prefs")
-_try_include("routers.study")
-_try_include("routers.report")
+try:
+    from .routers.study import router as study_router
+    app.include_router(study_router)
+except Exception:
+    pass
 
-# ---------- Basic routes ----------
+try:
+    from .routers.report import router as report_router
+    app.include_router(report_router)
+except Exception:
+    pass
+
+try:
+    from .routers.news import router as news_router
+    app.include_router(news_router)
+except Exception:
+    pass
+
+# ---- basic routes ----
 @app.get("/", include_in_schema=False)
-def home():
+def root():
     return RedirectResponse("/ui")
 
 @app.head("/", include_in_schema=False)
-def home_head():
+def root_head():
     return PlainTextResponse("")
 
 @app.get("/ui", response_class=HTMLResponse, include_in_schema=False)
 def ui(request: Request):
-    # index.html should live in app/templates/
+    index_path = TEMPLATES_DIR / "index.html"
+    if not index_path.exists():
+        msg = f"Template not found at {index_path}"
+        return HTMLResponse(f"<pre>{msg}</pre>", status_code=500)
     return templates.TemplateResponse("index.html", {"request": request})
 
-@app.get("/healthz", tags=["default"])
+@app.get("/healthz")
 def healthz():
     return {"status": "ok"}
+

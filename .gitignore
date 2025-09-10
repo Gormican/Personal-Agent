@@ -13,3 +13,4 @@ data/*.json
 .vscode/
 .idea/
 
+test_openai.py
